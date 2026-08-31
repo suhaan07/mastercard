@@ -157,7 +157,18 @@ It earns its place twice, both off that path:
 
 Without `ANTHROPIC_API_KEY` the narrative falls back to a deterministic template
 that is good enough to ship — the demo has no dependency on a secret or on the
-network.
+network. To enable it:
+
+```powershell
+cp .env.example .env      # then paste the key into ANTHROPIC_API_KEY=
+```
+
+`.env` is read at import by `detect/copilot.py` and is gitignored; an exported
+environment variable still wins over the file. The narrative runs on
+**`claude-haiku-4-5`** — the evidence is already assembled and quantified, so
+the model is writing two paragraphs over a JSON block rather than reasoning
+about fraud, at roughly half a cent per call. `FRAUD_NARRATIVE_MODEL` overrides
+it if you want `claude-opus-5` for a pitch.
 
 ## Measured results
 

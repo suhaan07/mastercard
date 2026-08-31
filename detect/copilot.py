@@ -30,8 +30,52 @@ import argparse
 import json
 import os
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
-MODEL = "claude-opus-5"
+
+def _load_dotenv() -> None:
+    """Read ``.env`` from the repo root into the environment, if it exists.
+
+    Hand-rolled rather than adding ``python-dotenv``: the whole job is fifteen
+    lines, and the project otherwise has no dependency that a plain
+    ``pip install lightgbm fastapi`` does not already bring in. Existing
+    environment variables win, so an exported key still overrides the file.
+    """
+    path = Path(__file__).resolve().parents[1] / ".env"
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv()
+
+#: Haiku is the right size for this job. The evidence is already assembled and
+#: already quantified -- the model is writing two paragraphs over a JSON block,
+#: not reasoning about fraud -- and it is roughly a fifth the cost of Opus.
+#: Override with ``FRAUD_NARRATIVE_MODEL`` to run the narrative on a larger
+#: model for a pitch.
+DEFAULT_MODEL = "claude-haiku-4-5"
+MODEL = os.environ.get("FRAUD_NARRATIVE_MODEL", DEFAULT_MODEL)
+
+#: Models that accept ``output_config.effort`` and server-side refusal
+#: fallbacks. Haiku 4.5 rejects both with a 400, so the request shape has to
+#: follow the model rather than being fixed.
+_FRONTIER_PREFIXES = (
+    "claude-fable-5",
+    "claude-mythos-5",
+    "claude-opus-5",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-sonnet-5",
+)
 
 #: Kept small on purpose. A case narrative is two paragraphs; a large ceiling
 #: only buys the chance of an essay in a queue that an analyst reads at speed.
@@ -208,22 +252,31 @@ def narrate(ev: CaseEvidence, use_model: bool | None = None) -> dict:
         import anthropic
 
         client = anthropic.Anthropic()
-        response = client.beta.messages.create(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
-            system=SYSTEM,
-            # A case narrative is a short piece of writing over evidence that is
-            # already assembled, so it does not need the top of the effort range.
-            output_config={"effort": "medium"},
-            # A fraud case description can trip a policy classifier; without a
-            # fallback the request simply stops, and an analyst queue that
-            # silently drops narratives is worse than one that never had them.
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
-            messages=[{"role": "user", "content": _prompt(ev)}],
-        )
+        request = {
+            "model": MODEL,
+            "max_tokens": MAX_TOKENS,
+            "system": SYSTEM,
+            "messages": [{"role": "user", "content": _prompt(ev)}],
+        }
 
-        if response.stop_reason == "refusal":
+        if MODEL.startswith(_FRONTIER_PREFIXES):
+            # A case narrative is short writing over assembled evidence, so it
+            # does not need the top of the effort range. And a fraud case
+            # description can trip a policy classifier -- without a fallback the
+            # request simply stops, and an analyst queue that silently drops
+            # narratives is worse than one that never had them.
+            response = client.beta.messages.create(
+                **request,
+                output_config={"effort": "medium"},
+                betas=["server-side-fallback-2026-07-01"],
+                fallbacks="default",
+            )
+        else:
+            # Haiku 4.5 rejects both of the above with a 400.
+            response = client.messages.create(**request)
+
+        # Only populated on the frontier models; harmless to check elsewhere.
+        if getattr(response, "stop_reason", None) == "refusal":
             return {
                 "narrative": template_narrative(ev),
                 "source": "template",

@@ -28,3 +28,7 @@ Thumbs.db
 
 # Runtime process tracking written by run.ps1
 .run-pids.json
+
+# Secrets. The example file is committed; the real one never is.
+.env
+.env.local
