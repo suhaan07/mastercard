@@ -40,9 +40,8 @@ python -m venv --system-site-packages .venv
 ```
 
 Console at <http://127.0.0.1:5173>, scorer docs at <http://127.0.0.1:8000/docs>.
-The demo run order, with the number each step should show, is in
-[DEMO.md](DEMO.md); a complete inventory of every layer, feature, field and
-scenario is in [REFERENCE.md](REFERENCE.md). `.\run.ps1 -Test` runs both suites and exits.
+The console opens a guided tour on a first visit. `.\run.ps1 -Test` runs both
+suites and exits.
 
 Individual stages:
 

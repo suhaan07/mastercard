@@ -32,3 +32,7 @@ Thumbs.db
 # Secrets. The example file is committed; the real one never is.
 .env
 .env.local
+
+# Internal working docs, kept locally rather than in the repo
+DEMO.md
+REFERENCE.md
