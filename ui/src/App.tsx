@@ -184,6 +184,51 @@ const STAGES: { key: "manufacture" | "onboard" | "weaponise"; title: string; blu
 
 const api = (path: string) => `/api${path}`;
 
+/**
+ * A human name for a community.
+ *
+ * "cmt_0005 · score 2.89 · suspicion 0.78" is what the detector calls it, and
+ * it tells a reader nothing. The rank is what an analyst works from — the queue
+ * is ordered by how strong the case is — so lead with that and keep the
+ * internal id alongside for anyone who wants to query it.
+ */
+function ringName(index: number): string {
+  return `Suspected ring #${index + 1}`;
+}
+
+/** One sentence that says what the evidence adds up to. */
+function verdict(ev: RingEvidence | null): { line: string; tone: string } | null {
+  if (!ev) return null;
+  const strong = (rows: EvidenceRow[]) =>
+    rows.filter((r) => r.elevated === true && severityOf(r) >= 3).length;
+
+  const made = strong(ev.manufacture);
+  const built = strong(ev.onboard);
+  const testing = strong(ev.weaponise);
+
+  const parts: string[] = [];
+  if (made) parts.push("faces and documents show generation artifacts");
+  if (built) parts.push("manufactured as one batch");
+  if (testing) parts.push("currently testing cards");
+
+  if (!parts.length) {
+    return {
+      line: "Nothing here stands out against the rest of the population. This looks like a cluster, not a ring.",
+      tone: "text-slate-400",
+    };
+  }
+  const joined =
+    parts.length === 1
+      ? parts[0]
+      : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  return {
+    line: `${ev.members} accounts across ${ev.institutions.length} institution${
+      ev.institutions.length === 1 ? "" : "s"
+    } — ${joined}.`,
+    tone: testing ? "text-rose-200" : "text-amber-200",
+  };
+}
+
 function fmt(v: number | null | undefined): string {
   if (v === null || v === undefined) return "--";
   if (v === 0) return "0";
@@ -341,6 +386,29 @@ export default function App() {
   const [items, setItems] = useState<StreamItem[]>([]);
   const [explanation, setExplanation] = useState<Explanation | null>(null);
   const graphRef = useRef<any>(null);
+  const canvasWrapRef = useRef<HTMLDivElement>(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 520 });
+
+  /**
+   * Measure the container and hand the size to the force graph explicitly.
+   *
+   * ForceGraph2D defaults its canvas to `window.innerWidth/innerHeight`, not to
+   * its parent element. On a wide screen that meant a 2880px canvas inside a
+   * ~900px column: it painted straight over the evidence panel to its right,
+   * which was therefore invisible, and `zoomToFit` fitted the graph to the
+   * canvas rather than to the visible area, leaving the nodes in a corner.
+   * Both symptoms were the same missing pair of props.
+   */
+  useEffect(() => {
+    const el = canvasWrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setCanvasSize({ width: Math.max(0, Math.floor(width)), height: Math.max(0, Math.floor(height)) });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   /**
    * Fit the layout to the canvas once it settles.
@@ -353,6 +421,13 @@ export default function App() {
   const fitGraph = useCallback(() => {
     graphRef.current?.zoomToFit(500, 70);
   }, []);
+
+  // A resize changes what "fit" means, so refit after one settles.
+  useEffect(() => {
+    if (!canvasSize.width) return;
+    const t = setTimeout(fitGraph, 120);
+    return () => clearTimeout(t);
+  }, [canvasSize.width, canvasSize.height, fitGraph]);
 
   useEffect(() => {
     fetch(api("/health"))
@@ -474,6 +549,7 @@ export default function App() {
   }, [items]);
 
   const dormantFlagged = confirmed?.n_dormant_flagged ?? 0;
+  const verdictLine = useMemo(() => verdict(evidence), [evidence]);
   const nodeTypesPresent = useMemo(
     () => Array.from(new Set(visibleNodes.map((n) => n.type))).sort(),
     [visibleNodes]
@@ -488,7 +564,8 @@ export default function App() {
               Synthetic Identity as Fraud Infrastructure
             </h1>
             <p className="text-xs text-slate-500">
-              Manufacture → onboard → age → weaponise, scored as one chain ·{" "}
+              Fake people are manufactured in batches, passed through KYC, aged quietly, then used
+              to test stolen cards ·{" "}
               <span className={status === "connected" ? "text-emerald-400" : "text-amber-400"}>
                 {status}
               </span>
@@ -534,6 +611,15 @@ export default function App() {
           />
         </div>
 
+        <p className="mb-5 max-w-5xl text-xs leading-relaxed text-slate-500">
+          Identity is scored once, at signup. Transactions are scored one at a time, at
+          authorisation. <span className="text-slate-300">Nobody scores the seam between them</span>{" "}
+          — so a batch of manufactured accounts gets caught one at a time, after each has already
+          been used. This console scores the seam: pick a suspected batch, read the evidence at
+          every stage of the chain, then confirm a single account and watch its siblings light up
+          before they act.
+        </p>
+
         <div className="grid gap-5 xl:grid-cols-[260px_minmax(0,1fr)_460px]">
           {/* -------------------------------------------------- ring list */}
           <aside className="rounded-lg border border-slate-800 bg-slate-900/40">
@@ -550,7 +636,7 @@ export default function App() {
                   </code>
                 </p>
               )}
-              {communities.map((c) => (
+              {communities.map((c, i) => (
                 <button
                   key={c.ring_id}
                   onClick={() => loadRing(c.ring_id)}
@@ -558,18 +644,17 @@ export default function App() {
                     selected === c.ring_id ? "bg-sky-500/10" : ""
                   }`}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-sm text-slate-200">{c.ring_id}</span>
-                    <span className="text-xs text-slate-500">{c.size} identities</span>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-sm font-medium text-slate-200">{ringName(i)}</span>
+                    <span className="shrink-0 text-xs text-slate-400">{c.size} accounts</span>
                   </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
-                    <span>score {c.score.toFixed(2)}</span>
-                    <span>suspicion {c.suspicion.toFixed(2)}</span>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
                     {c.cross_institution && (
                       <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-300">
-                        {c.institutions.length} institutions
+                        {c.institutions.length} banks
                       </span>
                     )}
+                    <span className="font-mono text-slate-600">{c.ring_id}</span>
                   </div>
                 </button>
               ))}
@@ -582,7 +667,9 @@ export default function App() {
               <div className="min-w-0 text-sm text-slate-300">
                 {graph ? (
                   <>
-                    <span className="font-mono">{graph.ring_id}</span>
+                    <span className="font-medium">
+                      {ringName(communities.findIndex((c) => c.ring_id === graph.ring_id))}
+                    </span>
                     <span className="ml-3 text-xs text-slate-500">
                       {visibleNodes.length} nodes · {visibleEdges.length} edges
                       {view === "merchant" && (
@@ -622,15 +709,17 @@ export default function App() {
               </div>
             </div>
 
-            <div className="relative h-[520px]">
+            <div ref={canvasWrapRef} className="relative h-[520px] overflow-hidden">
               {busy && !graph && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center text-sm text-slate-500">
                   building the ring…
                 </div>
               )}
-              {graph ? (
+              {graph && canvasSize.width > 0 ? (
                 <ForceGraph2D
                   ref={graphRef}
+                  width={canvasSize.width}
+                  height={canvasSize.height}
                   graphData={{
                     nodes: visibleNodes.map((n) => ({ ...n })),
                     links: visibleEdges.map((e) => ({ ...e })),
@@ -702,6 +791,13 @@ export default function App() {
 
             {evidence && (
               <div className="max-h-[700px] overflow-y-auto">
+                {verdictLine && (
+                  <div className="border-b border-slate-800 bg-slate-900/60 px-4 py-3">
+                    <p className={`text-sm leading-relaxed ${verdictLine.tone}`}>
+                      {verdictLine.line}
+                    </p>
+                  </div>
+                )}
                 {evidence.links.length > 0 && (
                   <div className="border-b border-slate-800 px-4 py-3">
                     <div className="text-[11px] uppercase tracking-wider text-slate-500">
