@@ -57,6 +57,8 @@ class ServiceState:
         #: is a demo cache and not an audit log -- the real one is the
         #: reason codes written alongside the decision downstream.
         self.decisions: dict = {}
+        #: Ring evidence, built alongside the graph. Off the auth path.
+        self.evidence = None
         self.latencies: list[float] = []
         self.meta: dict = {}
 
@@ -340,6 +342,28 @@ def explain(event_id: str) -> dict:
     }
 
 
+@app.get("/ring/{ring_id}/evidence")
+def ring_evidence(ring_id: str) -> dict:
+    """Why this community is a ring, as the three stages of the supply chain.
+
+    Manufacture, onboard, weaponise -- each figure beside the same figure for
+    the legitimate population, because a decline ratio of 0.82 means nothing
+    until it sits next to a population ratio of 0.04.
+    """
+    if state.evidence is None:
+        raise HTTPException(503, "evidence index not built; POST /admin/build-graph first")
+
+    community = next((c for c in state.communities if c.community_id == ring_id), None)
+    if community is None:
+        raise HTTPException(404, f"no community {ring_id}")
+
+    payload = state.evidence.for_ring(community.identity_ids)
+    payload["ring_id"] = ring_id
+    payload["cross_institution"] = community.is_cross_institution
+    payload["institutions"] = sorted(community.institutions)
+    return payload
+
+
 @app.post("/narrate/{ring_id}")
 def narrate_ring(ring_id: str, use_model: bool | None = None) -> dict:
     """A case narrative for one community. Deliberately off the auth path.
@@ -394,10 +418,15 @@ def build_graph(limit: int | None = None) -> dict:
         ident: c.community_id for c in state.communities for ident in c.identity_ids
     }
     state.transacted_identities = {e.identity_id for e in ds.auth}
+
+    from detect.evidence import EvidenceIndex
+
+    state.evidence = EvidenceIndex(ds.onboarding, ds.auth, getattr(state.graph, "links", []))
     return {
         "graph": state.graph.summary(),
         "communities": len(state.communities),
         "transacted_identities": len(state.transacted_identities),
+        "evidence_index": len(state.evidence.onboarding),
     }
 
 

@@ -165,6 +165,16 @@ Every number below is produced by this repo — `python -m eval.report --data
 data/<scenario>` for the detection tables, `python -m eval.robustness` for the
 curve — and everything is quoted at a **fixed 0.1% false-positive rate**.
 
+> **These numbers predate the card-wallet fix and need re-measuring.** The
+> simulator was minting a fresh card token for every legitimate transaction, so
+> a legitimate account carried 61 distinct cards and a ring account carried 7 —
+> which inverted the headline card-testing signal from the design doc. That is
+> fixed (customers now hold a 1-3 card wallet), but the fix shifts the random
+> stream, so every scenario has to be regenerated, retrained and re-reported
+> before the tables below are true of the current code. Detection was carried by
+> decline ratio, CVV failure and timing rather than by distinct-PAN counts, so
+> the direction of the results is not expected to change — but the figures will.
+
 Scoring is on the **out-of-time holdout**, the same split the model was trained
 against. Rolling windows are still built over the whole stream, because an
 event's features depend on everything before it, but the training period is not
@@ -399,7 +409,8 @@ impressive-looking numbers that meant nothing.
 contracts/   frozen schemas, graph types, decision types  (Phase 0)
 biohash/     FlyHash, HDC binding, image pipeline, artifact detector
 sim/         population, rings, card testing, look-alikes, scenarios
-detect/      ingest, graph, features, models, fusion, decision, red team, copilot
+detect/      ingest, graph, features, models, fusion, decision, red team,
+             copilot, ring evidence
 privacy/     Bloom-filter / MinHash indicator exchange
 api/         FastAPI scorer
 gateway/     Fastify gateway + mock merchant and issuer services

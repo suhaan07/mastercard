@@ -223,6 +223,11 @@ app.get<{ Querystring: Record<string, string> }>("/stream", async (request, repl
   }
 });
 
+app.get<{ Params: { ringId: string } }>("/ring/:ringId/evidence", async (request) => {
+  const r = await fetch(`${SCORER_URL}/ring/${request.params.ringId}/evidence`);
+  return await r.json();
+});
+
 app.get<{ Params: { ringId: string } }>("/graph/ring/:ringId", async (request) => {
   const r = await fetch(`${SCORER_URL}/graph/ring/${request.params.ringId}`);
   return await r.json();

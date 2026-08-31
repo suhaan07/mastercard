@@ -1,0 +1,43 @@
+# A small world that runs in seconds. Not a demo scenario -- this is what the
+# end-to-end tests run against, so it has to contain every structure the
+# pipeline depends on (two rings, dormant members, look-alikes, delayed labels)
+# at a size where a full graph build and a model fit take moments.
+#
+# The scenario existed as an ad-hoc config before this file did, which meant
+# `data/tiny` could not be regenerated from the repo. It can now.
+name: tiny
+seed: 7
+days: 30
+
+population:
+  n_customers: 120
+  n_merchants: 40
+  n_institutions: 3
+  daily_rate_mean: 0.55
+  daily_rate_sigma: 0.5
+
+ring:
+  name: moderate
+  n_rings: 2
+  ring_size_min: 8
+  ring_size_max: 12
+  device_reuse_rate: 0.55
+  subnet_concentration: 0.60
+  pii_recombination_rate: 0.35
+  doc_template_reuse: 0.60
+  face_reuse_rate: 0.50
+  face_jitter: 0.06
+  artifact_strength: 0.80
+  dormancy_days_min: 7
+  dormancy_days_max: 21
+  burst_intensity: 45.0
+  burst_hours: 3.0
+  n_bursts_per_account: 1
+  merchant_spread: 3
+  inter_arrival_jitter: 0.25
+  dormant_share: 0.45
+
+lookalikes:
+  n_small_business: 5
+  n_travellers: 5
+  n_new_device: 5

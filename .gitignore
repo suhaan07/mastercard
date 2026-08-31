@@ -25,3 +25,6 @@ dist/
 # Editors / OS
 .DS_Store
 Thumbs.db
+
+# Runtime process tracking written by run.ps1
+.run-pids.json

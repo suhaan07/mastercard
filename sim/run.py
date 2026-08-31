@@ -115,7 +115,7 @@ class Simulator:
                 session_day = float(t)
                 session_id = f"ses_{int(rng.integers(0, 2**48)):012x}"
             merchant = self.population_gen.pick_merchant(cust)
-            card_token, suffix = self.world.next_pan(sequential=False)
+            card_token, suffix = cust.card_at(float(t), rng)
             approved = rng.random() > merchant.base_decline_rate
             out.append(
                 AuthAttempt(

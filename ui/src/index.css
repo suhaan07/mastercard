@@ -2,5 +2,62 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: dark; }
-body { margin: 0; background: #0b0f14; color: #e6edf3; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: #0b0f14;
+  color: #e6edf3;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/*
+ * Scrollbars.
+ *
+ * Windows draws a light-grey scrollbar over a near-black panel, which on a
+ * dark console reads as a bright vertical stripe down the middle of the
+ * screen -- it was the most eye-catching element in the propagation table.
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border: 3px solid transparent;
+  border-radius: 6px;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::selection {
+  background: rgba(56, 189, 248, 0.3);
+}
+
+/* The force graph paints its own background; keep it from showing a focus ring. */
+canvas:focus {
+  outline: none;
+}

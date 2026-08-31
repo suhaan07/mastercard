@@ -38,11 +38,15 @@ class LifeEvent:
     """A genuine change in a customer's behaviour. Not fraud, but it looks new."""
 
     day: float
-    kind: str  # "device_change" | "travel" | "move"
+    kind: str  # "device_change" | "travel" | "move" | "card_reissue"
     duration_days: float = 0.0
     new_device_id: str | None = None
     new_ip_id: str | None = None
     new_asn: int | None = None
+    #: Set on a ``card_reissue``: the replacement card and the one it replaces,
+    #: both as ``(card_token, suffix)``. A genuine mid-run PAN change.
+    new_card: tuple[str, str] | None = None
+    replaces: tuple[str, str] | None = None
 
 
 @dataclass
@@ -56,9 +60,41 @@ class Customer:
     daily_rate: float
     amount_mu: float
     amount_sigma: float
+    #: The cards this customer actually holds, as ``(card_token, suffix)``.
+    #: A person carries one to three cards and uses them again and again. The
+    #: simulator previously minted a fresh card for every transaction, which
+    #: inverted the single most important card-testing signal in the design
+    #: doc: with a new PAN per purchase, "many distinct PANs" described the
+    #: legitimate population and the ring looked frugal by comparison.
+    cards: list[tuple[str, str]] = field(default_factory=list)
     life_events: list[LifeEvent] = field(default_factory=list)
     is_lookalike: bool = False
     lookalike_kind: str | None = None
+
+    def card_at(self, day: float, rng) -> tuple[str, str]:
+        """Pick one of the wallet's cards, honouring any reissue on this day.
+
+        Cards are not uniform: people have a card they reach for. The first is
+        weighted heaviest so the wallet has a primary rather than a shuffle.
+        """
+        live = [c for c in self.cards]
+        for ev in self.life_events:
+            if ev.kind == "card_reissue" and ev.day <= day and ev.new_card:
+                # A reissued card replaces the one it was issued against, which
+                # is a genuine mid-run change of PAN that is not fraud.
+                if ev.replaces in live:
+                    live[live.index(ev.replaces)] = ev.new_card
+        if not live:
+            return ("", "000000")
+        weights = [0.6, 0.3, 0.1][: len(live)]
+        total = sum(weights)
+        r = float(rng.random()) * total
+        acc = 0.0
+        for card, w in zip(live, weights):
+            acc += w
+            if r <= acc:
+                return card
+        return live[-1]
 
     def state_at(self, day: float) -> tuple[str, str, int]:
         """Device, IP and ASN in effect at ``day``, after any life events."""
@@ -135,6 +171,7 @@ class PopulationGenerator:
             ),
             amount_mu=float(rng.normal(pc.amount_mu, 0.35)),
             amount_sigma=float(np.clip(rng.normal(pc.amount_sigma, 0.15), 0.3, 2.0)),
+            cards=[w.next_pan(sequential=False) for _ in range(int(rng.integers(1, 4)))],
         )
         self._add_life_events(cust)
         return cust
@@ -143,6 +180,17 @@ class PopulationGenerator:
         rng = self.rng
         pc = self.cfg.population
         days = self.cfg.days
+        # Expiry, loss or a reissue after a breach. A genuine new PAN mid-run,
+        # so the distinct-PAN feature has to tolerate one without firing.
+        if cust.cards and rng.random() < 0.08:
+            cust.life_events.append(
+                LifeEvent(
+                    day=float(rng.uniform(0, days)),
+                    kind="card_reissue",
+                    new_card=self.world.next_pan(sequential=False),
+                    replaces=cust.cards[0],
+                )
+            )
         if rng.random() < pc.p_device_change:
             cust.life_events.append(
                 LifeEvent(
