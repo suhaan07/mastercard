@@ -384,6 +384,11 @@ export default function App() {
   const [graph, setGraph] = useState<RingGraph | null>(null);
   const [evidence, setEvidence] = useState<RingEvidence | null>(null);
   const [confirmed, setConfirmed] = useState<ConfirmResult | null>(null);
+  //: Identities raised by retro-propagation, kept apart from the graph data.
+  //: Folding them into the node objects meant rebuilding those objects, which
+  //: threw away the positions the force simulation stores on them -- so the
+  //: layout re-shuffled at the exact moment the siblings were meant to light up.
+  const [propagatedKeys, setPropagatedKeys] = useState<Set<string>>(new Set());
   const [narrative, setNarrative] = useState<Narrative | null>(null);
   const [status, setStatus] = useState<string>("connecting");
   const [busy, setBusy] = useState(false);
@@ -449,6 +454,7 @@ export default function App() {
   const loadRing = useCallback((ringId: string) => {
     setSelected(ringId);
     setConfirmed(null);
+    setPropagatedKeys(new Set());
     setNarrative(null);
     setEvidence(null);
     setBusy(true);
@@ -479,14 +485,10 @@ export default function App() {
       const res = await fetch(api(`/confirm/${seed.key}`), { method: "POST" });
       const data: ConfirmResult = await res.json();
       setConfirmed(data);
-      const flaggedKeys = new Set(data.flagged.map((f) => f.identity_id));
-      setGraph({
-        ...graph,
-        nodes: graph.nodes.map((n) => ({
-          ...n,
-          propagated: n.type === "identity" && flaggedKeys.has(n.key),
-        })),
-      });
+      // Colour changes only. The node objects the simulation is holding stay
+      // exactly as they are, so the siblings light up in place instead of the
+      // whole graph jumping.
+      setPropagatedKeys(new Set(data.flagged.map((f) => f.identity_id)));
     } finally {
       setBusy(false);
     }
@@ -511,19 +513,33 @@ export default function App() {
   useEffect(() => {
     if (!streaming) return;
     setItems([]);
-    const es = new EventSource(api(`/stream?speed=60&limit=4000&view=${view}`));
-    es.onmessage = (msg) => {
-      const item: StreamItem = JSON.parse(msg.data);
+
+    // Events arrive up to sixty a second, and a setState per event re-rendered
+    // the whole console -- graph included -- at that rate. Buffer them and
+    // flush on a tick: the table still looks live, and everything else stops
+    // being repainted for the sake of one row.
+    const buffer: StreamItem[] = [];
+    const flush = setInterval(() => {
+      if (!buffer.length) return;
+      const batch = buffer.splice(0, buffer.length).reverse();
       setItems((prev) => {
-        const next = [item, ...prev];
+        const next = [...batch, ...prev];
         return next.length > 400 ? next.slice(0, 400) : next;
       });
+    }, 250);
+
+    const es = new EventSource(api(`/stream?speed=60&limit=4000&view=${view}`));
+    es.onmessage = (msg) => {
+      buffer.push(JSON.parse(msg.data) as StreamItem);
     };
     es.onerror = () => {
       es.close();
       setStreaming(false);
     };
-    return () => es.close();
+    return () => {
+      clearInterval(flush);
+      es.close();
+    };
   }, [streaming, view]);
 
   const explain = useCallback((eventId: string) => {
@@ -533,18 +549,53 @@ export default function App() {
       .catch(() => setExplanation(null));
   }, []);
 
-  const visibleNodes = graph
-    ? view === "network"
-      ? graph.nodes
-      : // Merchant view: only what a single institution has observed. The
-        // evidence is not hidden from the chart, it is absent from the
-        // institution that would be scoring.
-        graph.nodes.filter((n) => n.institutions.includes(graph.institutions[0]))
-    : [];
-  const visibleIds = new Set(visibleNodes.map((n) => n.id));
-  const visibleEdges = graph
-    ? graph.edges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target))
-    : [];
+  const visibleNodes = useMemo(() => {
+    if (!graph) return [];
+    if (view === "network") return graph.nodes;
+    // Merchant view: only what a single institution has observed. The evidence
+    // is not hidden from the chart, it is absent from the institution that
+    // would be scoring.
+    return graph.nodes.filter((n) => n.institutions.includes(graph.institutions[0]));
+  }, [graph, view]);
+
+  const visibleEdges = useMemo(() => {
+    if (!graph) return [];
+    const ids = new Set(visibleNodes.map((n) => n.id));
+    return graph.edges.filter((e) => ids.has(e.source) && ids.has(e.target));
+  }, [graph, visibleNodes]);
+
+  /**
+   * Built once per ring and view, never per render.
+   *
+   * ForceGraph2D restarts its simulation whenever `graphData` changes identity,
+   * and the previous version constructed a fresh object -- with freshly spread
+   * node objects -- on every render. The live stream re-renders this component
+   * on every server-sent event, so the physics were being reheated dozens of
+   * times a second and the layout never settled. The simulation also stores
+   * x/y/vx/vy on the node objects it is given, so spreading them discarded the
+   * positions it had just computed.
+   */
+  const graphData = useMemo(
+    () => ({
+      nodes: visibleNodes.map((n) => ({ ...n })),
+      links: visibleEdges.map((e) => ({ ...e })),
+    }),
+    [visibleNodes, visibleEdges]
+  );
+
+  // Accessors are stable too, so a re-render does not look like a new config.
+  const nodeColor = useCallback(
+    (n: any) => (propagatedKeys.has(n.key) ? "#ff4d6d" : NODE_COLOR[n.type] ?? "#64748b"),
+    [propagatedKeys]
+  );
+  const nodeLabel = useCallback(
+    (n: any) =>
+      `${n.type}: ${n.key}${propagatedKeys.has(n.key) ? " — FLAGGED by propagation" : ""}`,
+    [propagatedKeys]
+  );
+  const nodeVal = useCallback((n: any) => (n.type === "identity" ? 3 : 1), []);
+  const linkColor = useCallback(() => "rgba(148,163,184,0.18)", []);
+  const linkWidth = useCallback((l: any) => Math.min(2, 0.3 + l.weight * 0.1), []);
 
   const interventionRate = items.length
     ? items.filter((i) => i.decision.action !== "allow").length / items.length
@@ -919,23 +970,17 @@ export default function App() {
                   ref={graphRef}
                   width={canvasSize.width}
                   height={canvasSize.height}
-                  graphData={{
-                    nodes: visibleNodes.map((n) => ({ ...n })),
-                    links: visibleEdges.map((e) => ({ ...e })),
-                  }}
+                  graphData={graphData}
                   backgroundColor="#0b0f14"
                   nodeRelSize={4}
-                  nodeVal={(n: any) => (n.type === "identity" ? 3 : 1)}
-                  nodeColor={(n: any) =>
-                    n.propagated ? "#ff4d6d" : NODE_COLOR[n.type] ?? "#64748b"
-                  }
-                  nodeLabel={(n: any) =>
-                    `${n.type}: ${n.key}${n.propagated ? " — FLAGGED by propagation" : ""}`
-                  }
-                  linkColor={() => "rgba(148,163,184,0.18)"}
-                  linkWidth={(l: any) => Math.min(2, 0.3 + l.weight * 0.1)}
+                  nodeVal={nodeVal}
+                  nodeColor={nodeColor}
+                  nodeLabel={nodeLabel}
+                  linkColor={linkColor}
+                  linkWidth={linkWidth}
                   cooldownTicks={90}
                   onEngineStop={fitGraph}
+                  warmupTicks={30}
                 />
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-1 text-slate-600">
