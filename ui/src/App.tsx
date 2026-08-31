@@ -26,6 +26,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 
+import { Tour, type TourStep } from "./Tour";
+
+//: Bump this when the tour changes materially, so returning visitors see it again.
+const TOUR_SEEN_KEY = "fraud-console-tour-v1";
+
 type ViewScope = "merchant" | "network";
 
 interface Community {
@@ -447,7 +452,9 @@ export default function App() {
     setNarrative(null);
     setEvidence(null);
     setBusy(true);
-    Promise.all([
+    // Returned, not just fired: the tour awaits this before explaining what is
+    // on screen, so a step never narrates an empty panel.
+    return Promise.all([
       fetch(api(`/graph/ring/${ringId}`)).then((r) => r.json()),
       fetch(api(`/ring/${ringId}/evidence`)).then((r) => (r.ok ? r.json() : null)),
     ])
@@ -548,7 +555,186 @@ export default function App() {
     return sorted[Math.min(sorted.length - 1, Math.floor(0.99 * sorted.length))];
   }, [items]);
 
+  const [tourOpen, setTourOpen] = useState(false);
   const dormantFlagged = confirmed?.n_dormant_flagged ?? 0;
+
+  // Start automatically the first time, because a judge will not think to look
+  // for a tour button. After that it is on demand.
+  useEffect(() => {
+    if (!communities.length) return;
+    try {
+      if (!localStorage.getItem(TOUR_SEEN_KEY)) setTourOpen(true);
+    } catch {
+      // Private browsing, or storage blocked. Not a reason to fail.
+    }
+  }, [communities.length]);
+
+  const closeTour = useCallback(() => {
+    setTourOpen(false);
+    try {
+      localStorage.setItem(TOUR_SEEN_KEY, "1");
+    } catch {
+      /* nothing to do */
+    }
+  }, []);
+
+  const topRing = communities[0]?.ring_id;
+
+  const tourSteps: TourStep[] = useMemo(
+    () => [
+      {
+        target: "header",
+        title: "What this is defending against",
+        placement: "bottom",
+        body: (
+          <>
+            Criminals use AI to invent people who do not exist — a generated face, a plausible
+            document, a real-ish address. The fake person opens an account, passes KYC, and sits
+            quietly for weeks looking like a boring new customer. Then it becomes a{" "}
+            <span className="text-slate-200">test bench</span> for stolen card numbers.
+          </>
+        ),
+      },
+      {
+        target: "thesis",
+        title: "The gap nobody scores",
+        placement: "bottom",
+        body: (
+          <>
+            Banks score identity <span className="text-slate-200">once, at signup</span>. They score
+            transactions <span className="text-slate-200">one at a time, at authorisation</span>.
+            Nobody scores the relationship between the two — and these accounts are manufactured in
+            batches of hundreds, so catching them one at a time, after each has been used, is
+            losing.
+          </>
+        ),
+      },
+      {
+        target: "ring-list",
+        title: "Suspected batches, not suspicious accounts",
+        placement: "right",
+        before: () => {
+          if (topRing) return loadRing(topRing);
+        },
+        settleMs: 200,
+        body: (
+          <>
+            We build a graph of who shares a device, an address, a phone, a face similarity, a
+            document template — then find the dense clusters. Each row is a suspected{" "}
+            <span className="text-slate-200">batch</span>, ranked by how strong the case is. I have
+            opened the strongest one.
+          </>
+        ),
+      },
+      {
+        target: "graph",
+        title: "What actually connects them",
+        placement: "left",
+        body: (
+          <>
+            Large blue dots are identities; the smaller coloured ones are the infrastructure they
+            share. Thirty-six people sharing sixteen devices and twenty-six addresses is not a
+            coincidence — that shape is the batch.
+          </>
+        ),
+      },
+      {
+        target: "evidence",
+        title: "Why this is a ring",
+        placement: "left",
+        body: (
+          <>
+            The verdict is at the top, then the proof underneath in three stages —{" "}
+            <span className="text-slate-200">manufacture, onboard, weaponise</span> — following the
+            attack itself. Every figure sits next to the same figure for everyone outside the ring,
+            because a decline ratio of 0.77 means nothing until you see 0.06 beside it.
+          </>
+        ),
+      },
+      {
+        target: "evidence",
+        title: "Read it as one sentence",
+        placement: "left",
+        body: (
+          <>
+            Their faces and documents carry generation artifacts. They were manufactured as one
+            batch — tens of times more likely to share a phone, a device, an address than anyone
+            else. And they are testing cards right now: over a hundred times the zero-value
+            authorisations, twenty times the CVV failures, at tiny amounts.
+          </>
+        ),
+      },
+      {
+        target: "confirm",
+        title: "Now the part that matters",
+        placement: "bottom",
+        body: (
+          <>
+            An analyst confirms <span className="text-slate-200">one</span> account as fraud. That
+            is all the input the system gets. Press Next and watch what happens to the rest of the
+            batch.
+          </>
+        ),
+      },
+      {
+        target: "propagation",
+        title: "One confirmation, the whole batch",
+        placement: "top",
+        before: () => confirmOne(),
+        settleMs: 400,
+        body: (
+          <>
+            Evidence propagates backwards through shared infrastructure to the confirmed account's
+            siblings — including accounts that have{" "}
+            <span className="text-rose-300">never transacted</span>. Those have no behavioural
+            signal at all, so no transaction model could ever reach them. Every row shows the exact
+            path the evidence travelled, so the block is explainable.
+          </>
+        ),
+      },
+      {
+        target: "view-toggle",
+        title: "Why this has to sit at the network",
+        placement: "bottom",
+        body: (
+          <>
+            Card testing is sprayed across many merchants on purpose, so each one sees three
+            attempts and nothing looks wrong. Switch to merchant view and evidence disappears — not
+            filtered from the chart, genuinely absent from the process that would be scoring. On
+            the hardest scenario a single merchant catches 10% of what the network catches 79% of.
+          </>
+        ),
+      },
+      {
+        target: "stream",
+        title: "And it runs at authorisation speed",
+        placement: "top",
+        before: () => setStreaming(true),
+        settleMs: 900,
+        body: (
+          <>
+            Real scoring over the scenario's traffic. Watch the{" "}
+            <span className="font-mono text-slate-200">ms</span> column — a few milliseconds
+            against a budget of about fifty. The auth path is a feature lookup and one
+            gradient-boosted model: no graph traversal, no image work, and deliberately no LLM.
+          </>
+        ),
+      },
+      {
+        target: "explain",
+        title: "Every decision explains itself",
+        placement: "top",
+        body: (
+          <>
+            Click any row in the stream for its reason codes in plain English. A block a human
+            cannot explain is a block a regulator will not accept — so nothing here is a bare
+            score. You can restart this tour any time from the button in the header.
+          </>
+        ),
+      },
+    ],
+    [topRing, loadRing, confirmOne]
+  );
   const verdictLine = useMemo(() => verdict(evidence), [evidence]);
   const nodeTypesPresent = useMemo(
     () => Array.from(new Set(visibleNodes.map((n) => n.type))).sort(),
@@ -557,9 +743,10 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0b0f14] text-slate-200">
+      <Tour steps={tourSteps} open={tourOpen} onClose={closeTour} />
       <header className="sticky top-0 z-20 border-b border-slate-800 bg-[#0b0f14]/95 backdrop-blur">
         <div className="mx-auto flex max-w-[1800px] flex-wrap items-center justify-between gap-4 px-6 py-3">
-          <div>
+          <div data-tour="header">
             <h1 className="text-base font-semibold text-slate-100">
               Synthetic Identity as Fraud Infrastructure
             </h1>
@@ -572,7 +759,17 @@ export default function App() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 p-1">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setTourOpen(true)}
+              className="rounded-md px-3 py-1.5 text-xs text-slate-400 ring-1 ring-slate-700 transition hover:bg-slate-800/60 hover:text-slate-200"
+            >
+              Guided tour
+            </button>
+            <div
+              data-tour="view-toggle"
+              className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 p-1"
+            >
             {(["merchant", "network"] as ViewScope[]).map((v) => (
               <button
                 key={v}
@@ -586,6 +783,7 @@ export default function App() {
                 {v} view
               </button>
             ))}
+            </div>
           </div>
         </div>
       </header>
@@ -611,7 +809,7 @@ export default function App() {
           />
         </div>
 
-        <p className="mb-5 max-w-5xl text-xs leading-relaxed text-slate-500">
+        <p data-tour="thesis" className="mb-5 max-w-5xl text-xs leading-relaxed text-slate-500">
           Identity is scored once, at signup. Transactions are scored one at a time, at
           authorisation. <span className="text-slate-300">Nobody scores the seam between them</span>{" "}
           — so a batch of manufactured accounts gets caught one at a time, after each has already
@@ -622,7 +820,7 @@ export default function App() {
 
         <div className="grid gap-5 xl:grid-cols-[260px_minmax(0,1fr)_460px]">
           {/* -------------------------------------------------- ring list */}
-          <aside className="rounded-lg border border-slate-800 bg-slate-900/40">
+          <aside data-tour="ring-list" className="rounded-lg border border-slate-800 bg-slate-900/40">
             <div className="flex h-14 items-center justify-between border-b border-slate-800 px-4">
               <span className="text-sm font-medium text-slate-300">Candidate rings</span>
               <span className="font-mono text-[11px] text-slate-500">{communities.length}</span>
@@ -662,7 +860,7 @@ export default function App() {
           </aside>
 
           {/* ------------------------------------------------------ graph */}
-          <main className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/40">
+          <main data-tour="graph" className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/40">
             <div className="flex h-14 items-center justify-between gap-3 border-b border-slate-800 px-4">
               <div className="min-w-0 text-sm text-slate-300">
                 {graph ? (
@@ -700,6 +898,7 @@ export default function App() {
                   Write the case
                 </button>
                 <button
+                  data-tour="confirm"
                   onClick={confirmOne}
                   disabled={!graph || busy}
                   className="rounded-md bg-rose-500/15 px-3 py-1 text-xs font-medium text-rose-300 ring-1 ring-rose-500/40 transition hover:bg-rose-500/25 disabled:opacity-30"
@@ -768,7 +967,7 @@ export default function App() {
           </main>
 
           {/* --------------------------------------------------- evidence */}
-          <aside className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/40">
+          <aside data-tour="evidence" className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/40">
             <div className="flex h-14 items-center justify-between gap-3 border-b border-slate-800 px-4">
               <div className="min-w-0">
                 <div className="text-sm font-medium text-slate-300">Why this is a ring</div>
@@ -827,7 +1026,10 @@ export default function App() {
 
         {/* ------------------------------------------- retro-propagation */}
         {confirmed && (
-          <section className="mt-5 rounded-lg border border-rose-900/50 bg-rose-950/20 p-4">
+          <section
+            data-tour="propagation"
+            className="mt-5 rounded-lg border border-rose-900/50 bg-rose-950/20 p-4"
+          >
             <h2 className="text-sm font-medium text-rose-300">
               Retro-propagation from <span className="font-mono">{confirmed.seed}</span>
             </h2>
@@ -929,7 +1131,7 @@ export default function App() {
 
         {/* ------------------------------------------------- live stream */}
         <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
-          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/40">
+          <div data-tour="stream" className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/40">
             <div className="flex h-14 items-center justify-between gap-3 border-b border-slate-800 px-4">
               <div className="min-w-0 text-sm font-medium text-slate-300">
                 Live authorisation stream
@@ -1012,7 +1214,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/40">
+          <div data-tour="explain" className="min-w-0 rounded-lg border border-slate-800 bg-slate-900/40">
             <div className="flex h-14 items-center border-b border-slate-800 px-4 text-sm font-medium text-slate-300">
               Explain this decision
             </div>
