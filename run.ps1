@@ -41,7 +41,15 @@ function Stop-All {
             # /T kills the whole tree. `npm run dev` is a .cmd shim that spawns
             # the real vite process as a child: stopping only the shim left node
             # holding the port, and the next start then failed on it.
-            $out = & taskkill.exe /PID $p.pid /T /F 2>&1
+            #
+            # Routed through cmd so that cmd, not PowerShell, swallows the
+            # stderr. Redirecting a native command's stderr in Windows
+            # PowerShell wraps each line in an ErrorRecord, which under
+            # `$ErrorActionPreference = "Stop"` is terminating -- so stopping a
+            # stack where one process had already exited threw instead of
+            # reporting "was not running", which is the exact case this loop
+            # exists to handle.
+            $null = cmd /c "taskkill /PID $($p.pid) /T /F >nul 2>nul"
             if ($LASTEXITCODE -eq 0) {
                 Write-Ok "stopped $($p.name) (pid $($p.pid))"
             } else {
@@ -75,6 +83,26 @@ if ($Test) {
 if (-not (Test-Path $python)) {
     throw "no venv at $python. Create it with: python -m venv --system-site-packages .venv"
 }
+
+# -- ports ------------------------------------------------------------------
+# Check before starting anything. A busy port surfaced sixty seconds later as
+# "scorer did not become healthy", which points at the scorer -- when the real
+# cause was an unrelated project already listening on 8000. Name the offender
+# instead, and say which switch moves us out of its way.
+function Assert-PortFree($port, $label, $switch) {
+    $conn = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $conn) { return }
+    $owner = (Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue)
+    $who = if ($owner) { "$($owner.ProcessName) (pid $($owner.Id))" } else { "pid $($conn.OwningProcess)" }
+    throw "port $port ($label) is already in use by $who. Stop it, or start on another port with $switch."
+}
+
+Assert-PortFree $ScorerPort  "scorer"   "-ScorerPort <n>"
+Assert-PortFree $GatewayPort "gateway"  "-GatewayPort <n>"
+Assert-PortFree $UiPort      "console"  "-UiPort <n>"
+Assert-PortFree 8101         "merchant" "a free 8101"
+Assert-PortFree 8102         "issuer"   "a free 8102"
 
 # -- build ------------------------------------------------------------------
 if ($Rebuild) {

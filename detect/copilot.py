@@ -123,6 +123,12 @@ class CaseEvidence:
     evidence_paths: list[dict] = field(default_factory=list)
     #: Behavioural features of the ring's testing traffic, already aggregated.
     behaviour: dict[str, float] = field(default_factory=dict)
+    #: The three supply-chain stages from ``detect.evidence``, each a list of
+    #: {metric, ring, population, ratio, elevated}. Without these the narrative
+    #: had the graph and nothing else -- the model's own first draft said "no
+    #: transactional behaviour data is available", which was true and was the
+    #: reason to pass them.
+    stages: dict[str, list] = field(default_factory=dict)
     #: Reason codes that fired, as raw codes; text is looked up separately.
     reason_codes: list[str] = field(default_factory=list)
     decision: str | None = None
@@ -176,6 +182,19 @@ def template_narrative(ev: CaseEvidence) -> str:
         bits = ", ".join(f"{k.replace('_', ' ')} {v:.3g}" for k, v in sorted(ev.behaviour.items()))
         first += f" Its authorisation traffic shows {bits}."
 
+    stage_lines = []
+    for stage, phrase in (
+        ("manufacture", "Their faces and documents run"),
+        ("onboard", "Their applications run"),
+        # Singular subject, so it does not read "their traffic run".
+        ("weaponise", "Their authorisation traffic runs"),
+    ):
+        top = _top_signals(ev.stages.get(stage, []))
+        if top:
+            stage_lines.append(f"{phrase} {top}.")
+    if stage_lines:
+        first += " " + " ".join(stage_lines)
+
     if ev.seed_identity:
         second = (
             f"Confirmation of {ev.seed_identity} propagated to {ev.n_flagged} sibling "
@@ -220,6 +239,30 @@ def template_narrative(ev: CaseEvidence) -> str:
         )
 
     return f"{first}\n\n{second}\n\n{step}"
+
+
+def _top_signals(rows: list, limit: int = 3) -> str:
+    """The strongest few signals in a stage, as a readable clause."""
+    scored = []
+    for r in rows:
+        ratio = r.get("ratio")
+        if not r.get("elevated") or not ratio:
+            continue
+        severity = ratio if ratio >= 1 else 1 / ratio
+        # "1x above the population" is not a finding. Only quote a gap that a
+        # reader would act on, and keep a decimal below 10 so 1.4x and 9.8x do
+        # not both round to the same claim.
+        if severity < 1.5:
+            continue
+        shown = f"{severity:.0f}" if severity >= 10 else f"{severity:.1f}"
+        direction = "above" if r.get("direction") == "higher" else "below"
+        scored.append((severity, f"{r.get('label', r.get('metric'))} {shown}x {direction}"))
+    if not scored:
+        return ""
+    scored.sort(reverse=True)
+    parts = [text for _, text in scored[:limit]]
+    joined = parts[0] if len(parts) == 1 else f"{', '.join(parts[:-1])} and {parts[-1]}"
+    return f"{joined} the rest of the population"
 
 
 def _prompt(ev: CaseEvidence) -> str:
@@ -308,6 +351,7 @@ def evidence_for_ring(
     propagated: dict | None = None,
     behaviour: dict[str, float] | None = None,
     reason_codes: list[str] | None = None,
+    index=None,
 ) -> CaseEvidence:
     """Assemble a ``CaseEvidence`` from the objects the scorer already holds."""
     from contracts.graph_types import NodeType, node_id
@@ -343,6 +387,11 @@ def evidence_for_ring(
         for p in sorted(flagged.values(), key=lambda x: -x.propagated_score)[:5]
     ]
 
+    stages: dict[str, list] = {}
+    if index is not None:
+        full = index.for_ring(community.identity_ids)
+        stages = {k: full.get(k, []) for k in ("manufacture", "onboard", "weaponise")}
+
     return CaseEvidence(
         ring_id=community.community_id,
         ring_size=community.size,
@@ -357,6 +406,7 @@ def evidence_for_ring(
         evidence_paths=paths,
         behaviour=behaviour or {},
         reason_codes=reason_codes or [],
+        stages=stages,
     )
 
 
@@ -401,7 +451,10 @@ def main() -> None:
     seed = next((i for i in community.identity_ids if i in transacted), None)
     prop = mark_dormant(propagate(ig, {seed: 1.0}), transacted) if seed else {}
 
-    ev = evidence_for_ring(community, ig, prop)
+    from detect.evidence import EvidenceIndex
+
+    index = EvidenceIndex(ds.onboarding, ds.auth, getattr(ig, "links", []))
+    ev = evidence_for_ring(community, ig, prop, index=index)
     use_model = True if args.model else (False if args.no_model else None)
     result = narrate(ev, use_model=use_model)
 

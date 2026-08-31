@@ -383,7 +383,7 @@ def narrate_ring(ring_id: str, use_model: bool | None = None) -> dict:
     if community is None:
         raise HTTPException(404, f"no community {ring_id}")
 
-    ev = evidence_for_ring(community, state.graph, state.propagated)
+    ev = evidence_for_ring(community, state.graph, state.propagated, index=state.evidence)
     result = narrate(ev, use_model=use_model)
     result["evidence"] = ev.__dict__
     result["ring_id"] = ring_id
