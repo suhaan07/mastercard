@@ -1,0 +1,27 @@
+# A patient operator. Near-unique devices, dispersed subnets, long dormancy,
+# low-and-slow testing across many merchants, and a good generator. This is the
+# scenario the headline robustness number is quoted against.
+name: sophisticated
+seed: 20260830
+days: 120
+
+ring:
+  name: sophisticated
+  n_rings: 6
+  ring_size_min: 18
+  ring_size_max: 40
+  device_reuse_rate: 0.18
+  subnet_concentration: 0.22
+  pii_recombination_rate: 0.12
+  doc_template_reuse: 0.28
+  face_reuse_rate: 0.25
+  face_jitter: 0.11
+  artifact_strength: 0.25
+  dormancy_days_min: 30
+  dormancy_days_max: 60
+  burst_intensity: 9.0
+  burst_hours: 8.0
+  n_bursts_per_account: 1
+  merchant_spread: 14
+  inter_arrival_jitter: 0.85
+  dormant_share: 0.62

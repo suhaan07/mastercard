@@ -1,0 +1,26 @@
+# A competent operator. Some infrastructure reuse, moderate ageing, attempts
+# spread over a handful of merchants.
+name: moderate
+seed: 20260830
+days: 90
+
+ring:
+  name: moderate
+  n_rings: 5
+  ring_size_min: 20
+  ring_size_max: 45
+  device_reuse_rate: 0.55
+  subnet_concentration: 0.60
+  pii_recombination_rate: 0.35
+  doc_template_reuse: 0.60
+  face_reuse_rate: 0.50
+  face_jitter: 0.07
+  artifact_strength: 0.80
+  dormancy_days_min: 10
+  dormancy_days_max: 25
+  burst_intensity: 30.0
+  burst_hours: 3.0
+  n_bursts_per_account: 1
+  merchant_spread: 5
+  inter_arrival_jitter: 0.35
+  dormant_share: 0.65

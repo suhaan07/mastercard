@@ -1,0 +1,54 @@
+# Decision-engine configuration.
+#
+# Thresholds set the bands; triggers attach human-readable reason codes when a
+# feature crosses a line. Triggers are explanatory, not additive: the model
+# score decides the action, these say why in language an analyst and a
+# regulator can both use.
+
+thresholds:
+  medium: 0.30      # step-up / 3DS challenge
+  elevated: 0.55    # silent velocity throttle
+  high: 0.75        # honeypot: poison the attacker's results
+  confirmed: 0.90   # block + freeze ring + analyst case
+
+# How much a poor onboarding score tightens behavioural thresholds.
+# 0.25 means a maximally-suspicious onboarding lowers every band by 25%.
+onboarding_tightening: 0.25
+
+triggers:
+  high_decline_ratio:
+    feature: acct_decline_ratio_1h
+    above: 0.55
+  many_distinct_pans:
+    feature: acct_distinct_pans_1h
+    above: 8
+  low_pan_entropy:
+    feature: acct_pan_entropy_1h
+    below: 0.35
+  zero_auth_burst:
+    feature: acct_zero_auth_ratio_1h
+    above: 0.30
+  low_ticket_concentration:
+    feature: acct_low_ticket_ratio_1h
+    above: 0.70
+  cvv_avs_mismatch_rate:
+    feature: acct_cvv_bad_ratio_1h
+    above: 0.45
+  machine_regular_timing:
+    feature: acct_timing_cv_1h
+    below: 0.30
+  narrow_merchant_set:
+    feature: acct_pans_per_merchant_1h
+    above: 6
+  velocity_spike:
+    feature: acct_n_1m
+    above: 5
+  shared_device_with_flagged:
+    feature: device_distinct_pans_1h
+    above: 10
+  subnet_concentration:
+    feature: ip_distinct_pans_1h
+    above: 12
+  thin_file_sudden_activity:
+    feature: acct_age_days
+    below: 2.0

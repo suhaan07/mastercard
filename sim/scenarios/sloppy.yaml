@@ -1,0 +1,27 @@
+# A careless operator. Shares devices freely, bursts hard from one subnet,
+# barely ages accounts, and uses a generator that leaves loud artifacts.
+# This is the "one clean win" demo.
+name: sloppy
+seed: 20260830
+days: 90
+
+ring:
+  name: sloppy
+  n_rings: 4
+  ring_size_min: 25
+  ring_size_max: 55
+  device_reuse_rate: 0.85
+  subnet_concentration: 0.90
+  pii_recombination_rate: 0.60
+  doc_template_reuse: 0.90
+  face_reuse_rate: 0.80
+  face_jitter: 0.04
+  artifact_strength: 1.60
+  dormancy_days_min: 2
+  dormancy_days_max: 7
+  burst_intensity: 45.0
+  burst_hours: 2.0
+  n_bursts_per_account: 1
+  merchant_spread: 2
+  inter_arrival_jitter: 0.10
+  dormant_share: 0.60
